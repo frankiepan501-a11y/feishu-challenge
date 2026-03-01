@@ -20,7 +20,10 @@ function httpsPost(hostname, path, headers, body) {
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { resolve(data); } });
+      res.on('end', () => {
+        console.log('[HTTP响应]', res.statusCode, data.substring(0, 300));
+        try { resolve(JSON.parse(data)); } catch(e) { resolve(data); }
+      });
     });
     req.on('error', reject);
     req.write(payload);
@@ -45,21 +48,19 @@ async function sendFeishuMessage(token, chatId, text) {
 async function callClaude(userMessage) {
   const res = await httpsPost('api.anthropic.com', '/v1/messages', {
     'x-api-key': CONFIG.ANTHROPIC_API_KEY,
-    'anthropic-version': '2023-06-01',
-    'anthropic-beta': 'mcp-client-2025-04-04'
+    'anthropic-version': '2023-06-01'
   }, {
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8096,
-    system: '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。在有利润的前提下，用最短时间、最低风险，帮助用户发现高潜力市场机会，验证竞争环境，测算投入产出，并打造差异化产品。请使用Sorftime MCP工具进行数据分析，输出结构化的选品报告。',
-    messages: [{ role: 'user', content: userMessage }],
-    mcp_servers: [{ type: 'url', url: `https://mcp.sellersprite.com/mcp?secret-key=${CONFIG.SORFTIME_KEY}`, name: 'sorftime-mcp' }]
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: userMessage }]
   });
 
+  console.log('[Claude响应]', JSON.stringify(res).substring(0, 500));
   let text = '';
   if (res.content && Array.isArray(res.content)) {
     for (const block of res.content) { if (block.type === 'text') text += block.text; }
   }
-  return text || '抱歉，分析出现问题，请稍后重试。';
+  return text || ('Claude返回空，原始数据: ' + JSON.stringify(res).substring(0, 200));
 }
 
 async function handleMessage(data) {
@@ -88,7 +89,7 @@ async function handleMessage(data) {
 
   try {
     const token = await getFeishuToken();
-    await sendFeishuMessage(token, chatId, `🔍 正在为您分析「${text}」，请稍候（约30-60秒）...`);
+    await sendFeishuMessage(token, chatId, `🔍 正在分析，请稍候...`);
 
     let reply = await callClaude(text);
     if (reply.length > 4000) reply = reply.substring(0, 3900) + '...\n（内容较长已截断）';
@@ -97,33 +98,29 @@ async function handleMessage(data) {
     await sendFeishuMessage(token2, chatId, reply);
     console.log('[回复成功]');
   } catch(e) {
-    console.error('[处理失败]', e.message);
+    console.error('[处理失败]', e.message, e.stack);
     try {
       const t = await getFeishuToken();
-      await sendFeishuMessage(t, chatId, '抱歉，处理请求时出现错误，请稍后重试。');
+      await sendFeishuMessage(t, chatId, '错误: ' + e.message);
     } catch(e2) {}
   }
 }
 
 const server = http.createServer((req, res) => {
-  if (req.method === 'GET') { res.writeHead(200); res.end('飞书Sorftime选品机器人运行中'); return; }
+  if (req.method === 'GET') { res.writeHead(200); res.end('OK'); return; }
 
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
     try {
       const data = JSON.parse(body);
-      console.log('[收到]', JSON.stringify(data).substring(0, 200));
-
       if (data.type === 'url_verification' || data.challenge) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ challenge: data.challenge }));
         return;
       }
-
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ code: 0 }));
-
       handleMessage(data).catch(e => console.error('[异步错误]', e.message));
     } catch(e) {
       console.error('[解析错误]', e.message);
@@ -132,4 +129,6 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(CONFIG.PORT, () => console.log(`🚀 机器人已启动，端口: ${CONFIG.PORT}`));
+server.listen(CONFIG.PORT, () => console.log(`🚀 启动，端口: ${CONFIG.PORT}`));
+
+
