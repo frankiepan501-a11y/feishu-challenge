@@ -2,10 +2,10 @@ const http = require('http');
 const https = require('https');
 
 const CONFIG = {
-  FEISHU_APP_ID: 'cli_a9f6ae86fce8dbd8',
-  FEISHU_APP_SECRET: 'r0eQTiBoP1WnQCUnBanMQeu5ACT57at7',
-  ANTHROPIC_API_KEY: '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',
-  SORFTIME_MCP: 'https://mcp.sellersprite.com/mcp?secret-key=e3f3af52ac2e4e2fa4d4c280426076b1',
+  FEISHU_APP_ID: process.env.FEISHU_APP_ID,
+  FEISHU_APP_SECRET: process.env.FEISHU_APP_SECRET,
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+  SORFTIME_KEY: process.env.SORFTIME_KEY || 'e3f3af52ac2e4e2fa4d4c280426076b1',
   PORT: process.env.PORT || 3000
 };
 
@@ -52,7 +52,7 @@ async function callClaude(userMessage) {
     max_tokens: 8096,
     system: '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。在有利润的前提下，用最短时间、最低风险，帮助用户发现高潜力市场机会，验证竞争环境，测算投入产出，并打造差异化产品。请使用Sorftime MCP工具进行数据分析，输出结构化的选品报告。',
     messages: [{ role: 'user', content: userMessage }],
-    mcp_servers: [{ type: 'url', url: CONFIG.SORFTIME_MCP, name: 'sorftime-mcp' }]
+    mcp_servers: [{ type: 'url', url: `https://mcp.sellersprite.com/mcp?secret-key=${CONFIG.SORFTIME_KEY}`, name: 'sorftime-mcp' }]
   });
 
   let text = '';
