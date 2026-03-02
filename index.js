@@ -11,17 +11,19 @@ const CONFIG = {
 
 const processedMessages = new Set();
 
-function httpsPost(hostname, path, headers, body) {
+function httpsPost(hostname, path, headers, body, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const payload = typeof body === 'string' ? body : JSON.stringify(body);
     const req = https.request({
       hostname, path, method: 'POST', port: 443,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers }
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers },
+      timeout: timeoutMs
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { resolve(data); } });
     });
+    req.on('timeout', () => { req.destroy(); reject(new Error(`Request timeout after ${timeoutMs}ms`)); });
     req.on('error', reject);
     req.write(payload);
     req.end();
@@ -43,6 +45,8 @@ async function sendFeishuMessage(token, chatId, text) {
 }
 
 async function callClaude(userMessage) {
+  console.log('[调用Claude+MCP] 开始，时间:', new Date().toISOString());
+  
   const res = await httpsPost('api.anthropic.com', '/v1/messages', {
     'x-api-key': CONFIG.ANTHROPIC_API_KEY,
     'anthropic-version': '2023-06-01',
@@ -50,17 +54,29 @@ async function callClaude(userMessage) {
   }, {
     model: 'claude-sonnet-4-6',
     max_tokens: 8096,
-    system: '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。在有利润的前提下，用最短时间、最低风险，帮助用户发现高潜力市场机会，验证竞争环境，测算投入产出，并打造差异化产品。请使用Sorftime MCP工具进行真实数据分析，输出结构化的选品报告。报告需包含：市场概况、竞争分析、财务测算、差异化建议。',
+    system: '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。在有利润的前提下，用最短时间、最低风险，帮助用户发现高潜力市场机会，验证竞争环境，测算投入产出，并打造差异化产品。请使用Sorftime MCP工具进行真实数据分析，输出结构化的选品报告。',
     messages: [{ role: 'user', content: userMessage }],
     mcp_servers: [{ type: 'url', url: `https://mcp.sellersprite.com/mcp?secret-key=${CONFIG.SORFTIME_KEY}`, name: 'sorftime-mcp' }]
-  });
+  }, 600000); // 10分钟超时
+
+  console.log('[Claude响应] 时间:', new Date().toISOString(), '类型:', res.type);
+  
+  // 检查是否有错误
+  if (res.type === 'error') {
+    throw new Error(res.error?.message || JSON.stringify(res));
+  }
 
   let text = '';
   if (res.content && Array.isArray(res.content)) {
     for (const block of res.content) { if (block.type === 'text') text += block.text; }
   }
-  if (!text && res.error) text = '分析出现问题: ' + res.error.message;
-  return text || '抱歉，分析出现问题，请稍后重试。';
+  
+  if (!text) {
+    console.log('[Claude完整响应]', JSON.stringify(res).substring(0, 500));
+    throw new Error('Claude返回空内容，stop_reason: ' + res.stop_reason);
+  }
+  
+  return text;
 }
 
 async function handleMessage(data) {
@@ -89,7 +105,7 @@ async function handleMessage(data) {
 
   try {
     const token = await getFeishuToken();
-    await sendFeishuMessage(token, chatId, `🔍 正在调用Sorftime数据分析「${text}」，请稍候（约60秒）...`);
+    await sendFeishuMessage(token, chatId, `🔍 正在调用Sorftime数据分析，请稍候（约2-3分钟）...`);
 
     let reply = await callClaude(text);
     if (reply.length > 4000) reply = reply.substring(0, 3900) + '...\n（内容较长已截断）';
@@ -130,3 +146,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(CONFIG.PORT, () => console.log(`🚀 机器人已启动，端口: ${CONFIG.PORT}`));
+
+
