@@ -56,7 +56,7 @@ async function callClaude(userMessage) {
     max_tokens: 8096,
     system: '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。在有利润的前提下，用最短时间、最低风险，帮助用户发现高潜力市场机会，验证竞争环境，测算投入产出，并打造差异化产品。请使用Sorftime MCP工具进行真实数据分析，输出结构化的选品报告。',
     messages: [{ role: 'user', content: userMessage }],
-    mcp_servers: [{ type: 'url', url: `https://mcp.sellersprite.com/mcp?secret-key=${CONFIG.SORFTIME_KEY}`, name: 'sorftime-mcp' }]
+    mcp_servers: [{ type: 'url', url: `https://mcp.sorftime.com?key=${CONFIG.SORFTIME_KEY}`, name: 'sorftime-mcp' }]
   }, 600000); // 10分钟超时
 
   console.log('[Claude响应] 时间:', new Date().toISOString(), '类型:', res.type);
