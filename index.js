@@ -91,8 +91,7 @@ function detectIntent(text) {
   };
 }
 
-async function callClaude(userMessage, systemPrompt) {
-  console.log('[调用Claude] 开始:', new Date().toISOString());
+async function callClaudeOnce(userMessage, systemPrompt) {
   const res = await httpsPost('api.anthropic.com', '/v1/messages', {
     'x-api-key': CONFIG.ANTHROPIC_API_KEY,
     'anthropic-version': '2023-06-01',
@@ -114,6 +113,26 @@ async function callClaude(userMessage, systemPrompt) {
   }
   if (!text) throw new Error('Claude返回空内容，stop_reason: ' + res.stop_reason);
   return text;
+}
+
+async function callClaude(userMessage, systemPrompt, chatId) {
+  const maxRetries = 3;
+  for (let i = 1; i <= maxRetries; i++) {
+    try {
+      console.log(`[调用Claude] 第${i}次尝试:`, new Date().toISOString());
+      return await callClaudeOnce(userMessage, systemPrompt);
+    } catch(e) {
+      const isMcpError = e.message.includes('timed out') || e.message.includes('unavailable') || e.message.includes('unresponsive');
+      console.error(`[第${i}次失败]`, e.message);
+      if (i < maxRetries && isMcpError) {
+        const token = await getFeishuToken();
+        await sendFeishuMessage(token, chatId, `⏳ MCP连接不稳定，正在重试（第${i}次/共${maxRetries}次）...`);
+        await new Promise(r => setTimeout(r, 3000));
+      } else {
+        throw e;
+      }
+    }
+  }
 }
 
 const NORMAL_SYSTEM = `你是专业的亚马逊选品顾问，精通Sorftime选品方法论。
@@ -202,7 +221,7 @@ async function handleMessage(data) {
     }
 
     const systemPrompt = isDeep ? DEEP_SYSTEM : NORMAL_SYSTEM;
-    let reply = await callClaude(text, systemPrompt);
+    let reply = await callClaude(text, systemPrompt, chatId);
 
     const token2 = await getFeishuToken();
 
