@@ -44,74 +44,55 @@ async function sendFeishuMessage(token, chatId, text) {
   );
 }
 
-// 创建飞书文档并写入内容
 async function createFeishuDoc(token, title, content) {
-  // 第一步：创建空文档
-  const createRes = await httpsPost('open.feishu.cn', '/open-apis/docx/v1/documents', 
-    { Authorization: `Bearer ${token}` },
-    { title }
-  );
-  console.log('[创建文档]', JSON.stringify(createRes).substring(0, 200));
-  
+  const createRes = await httpsPost('open.feishu.cn', '/open-apis/docx/v1/documents',
+    { Authorization: `Bearer ${token}` }, { title });
   const docId = createRes.data?.document?.document_id;
   if (!docId) throw new Error('创建文档失败: ' + JSON.stringify(createRes));
 
-  // 第二步：将 markdown 内容转换为飞书文档块
   const blocks = markdownToBlocks(content);
-  
-  // 第三步：批量写入内容块
-  await httpsPost('open.feishu.cn', `/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children/batch_update`,
-    { Authorization: `Bearer ${token}` },
-    { requests: blocks }
-  );
-
+  if (blocks.length > 0) {
+    await httpsPost('open.feishu.cn', `/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children/batch_update`,
+      { Authorization: `Bearer ${token}` }, { requests: blocks });
+  }
   return `https://docs.feishu.cn/docs/${docId}`;
 }
 
-// 简单的 markdown 转飞书文档块
 function markdownToBlocks(markdown) {
   const lines = markdown.split('\n');
   const requests = [];
-  
   for (const line of lines) {
     if (!line.trim()) continue;
-    
     let block;
     if (line.startsWith('# ')) {
-      block = { block_type: 2, heading1: { elements: [{ type: 0, text_run: { content: line.replace(/^# /, ''), text_element_style: {} } }] } };
+      block = { block_type: 2, heading1: { elements: [{ type: 0, text_run: { content: line.replace(/^# /, '').replace(/[^\x00-\x7F\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, ''), text_element_style: {} } }] } };
     } else if (line.startsWith('## ')) {
       block = { block_type: 3, heading2: { elements: [{ type: 0, text_run: { content: line.replace(/^## /, ''), text_element_style: {} } }] } };
     } else if (line.startsWith('### ')) {
       block = { block_type: 4, heading3: { elements: [{ type: 0, text_run: { content: line.replace(/^### /, ''), text_element_style: {} } }] } };
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      block = { block_type: 12, bullet: { elements: [{ type: 0, text_run: { content: line.replace(/^[-*] /, ''), text_element_style: {} } }] } };
+      block = { block_type: 12, bullet: { elements: [{ type: 0, text_run: { content: line.replace(/^[-*] /, '').replace(/\*\*(.*?)\*\*/g, '$1'), text_element_style: {} } }] } };
     } else if (/^\d+\. /.test(line)) {
-      block = { block_type: 13, ordered: { elements: [{ type: 0, text_run: { content: line.replace(/^\d+\. /, ''), text_element_style: {} } }] } };
+      block = { block_type: 13, ordered: { elements: [{ type: 0, text_run: { content: line.replace(/^\d+\. /, '').replace(/\*\*(.*?)\*\*/g, '$1'), text_element_style: {} } }] } };
     } else {
-      // 处理粗体 **text**
-      const content = line.replace(/\*\*(.*?)\*\*/g, '$1');
-      block = { block_type: 1, text: { elements: [{ type: 0, text_run: { content, text_element_style: {} } }] } };
+      block = { block_type: 1, text: { elements: [{ type: 0, text_run: { content: line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/^[-—>|]+\s*/, ''), text_element_style: {} } }] } };
     }
-    
     requests.push({ index: requests.length + 1, block });
   }
-  
   return requests;
 }
 
-// 判断是否需要生成飞书文档
-function needsDoc(text) {
-  const keywords = ['飞书文档', '生成文档', '创建文档', '文档报告', '保存文档', '写成文档', '整理成文档'];
-  return keywords.some(k => text.includes(k));
+function detectIntent(text) {
+  const deepKeywords = ['深度分析', '完整分析', '系统分析', '全面分析', '深入分析'];
+  const docKeywords = ['飞书文档', '生成文档', '创建文档', '文档报告', '写成文档'];
+  return {
+    isDeep: deepKeywords.some(k => text.includes(k)),
+    isDoc: docKeywords.some(k => text.includes(k))
+  };
 }
 
-async function callClaude(userMessage, withDoc = false) {
-  console.log('[调用Claude+MCP] 开始，时间:', new Date().toISOString());
-  
-  const systemPrompt = withDoc
-    ? '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。请使用Sorftime MCP工具进行真实数据分析，输出完整结构化的选品报告。报告用Markdown格式，包含：一、市场规模概览，二、竞争格局分析，三、机会产品筛选，四、财务测算，五、差异化建议，六、行动计划。'
-    : '你是专业的亚马逊选品顾问，精通Sorftime选品方法论。在有利润的前提下，用最短时间、最低风险，帮助用户发现高潜力市场机会，验证竞争环境，测算投入产出，并打造差异化产品。请使用Sorftime MCP工具进行真实数据分析，输出结构化的选品报告。';
-
+async function callClaude(userMessage, systemPrompt) {
+  console.log('[调用Claude] 开始:', new Date().toISOString());
   const res = await httpsPost('api.anthropic.com', '/v1/messages', {
     'x-api-key': CONFIG.ANTHROPIC_API_KEY,
     'anthropic-version': '2023-06-01',
@@ -124,16 +105,65 @@ async function callClaude(userMessage, withDoc = false) {
     mcp_servers: [{ type: 'url', url: `https://mcp.sorftime.com?key=${CONFIG.SORFTIME_KEY}`, name: 'sorftime-mcp' }]
   }, 600000);
 
-  console.log('[Claude响应] 时间:', new Date().toISOString(), '类型:', res.type);
+  console.log('[Claude响应]', new Date().toISOString(), 'type:', res.type);
   if (res.type === 'error') throw new Error(res.error?.message || JSON.stringify(res));
 
   let text = '';
   if (res.content && Array.isArray(res.content)) {
     for (const block of res.content) { if (block.type === 'text') text += block.text; }
   }
-  if (!text) throw new Error('Claude返回空内容');
+  if (!text) throw new Error('Claude返回空内容，stop_reason: ' + res.stop_reason);
   return text;
 }
+
+const NORMAL_SYSTEM = `你是专业的亚马逊选品顾问，精通Sorftime选品方法论。
+请根据用户问题灵活使用Sorftime MCP工具查询真实数据后回答。
+回答简洁专业，重点突出，使用中文。`;
+
+const DEEP_SYSTEM = `你是专业的亚马逊选品顾问，精通Sorftime选品方法论。请按以下步骤完成完整深度分析：
+
+【第一步：发现机会市场】
+- 用 category_search_from_product_name 搜索相关细分类目
+- 筛选标准：月销量>5000、亚马逊自营占比<30%、Top3集中度<50%
+- 选出3个最有潜力的细分类目
+
+【第二步：验证竞争格局】  
+- 用 category_report 获取每个类目Top产品数据
+- 分析头部品牌/卖家集中度、评论数门槛、价格带分布
+- 每个类目找出2-3个对标竞品ASIN
+
+【第三步：查询1688采购成本】
+- 用 ali1688_similar_product 查询每个产品的1688采购价
+- 计算毛利率：(售价 - 采购成本 - FBA费用 - 头程) / 售价
+- FBA费用估算：小件$3-5，中件$5-8，大件$8-15
+
+【第四步：输出完整报告】
+报告格式（Markdown）：
+# 🎯 [产品类别] 亚马逊美国站深度选品报告
+> 数据来源：Sorftime MCP实时数据
+
+## 一、市场机会总览
+（3个类目对比表格：月销量/均价/亚马逊占比/Top3集中度/新品占比）
+
+## 二、推荐选品方向
+（每个类目详细分析：市场规模、竞争格局、切入机会）
+
+## 三、对标竞品分析
+（Top竞品：ASIN/月销量/价格/评论数/核心卖点）
+
+## 四、1688采购与利润测算
+（采购成本/FBA费/头程/利润率/回本周期）
+
+## 五、差异化打造建议
+（产品改进方向/Listing关键词/定价策略）
+
+## 六、行动计划
+（30天/60天/90天执行步骤）
+
+## 七、综合评分与推荐
+（三个方向评分对比，给出最终推荐）
+
+请务必调用真实MCP数据，所有数据需标注来源。`;
 
 async function handleMessage(data) {
   const body = data.body ?? data;
@@ -154,41 +184,44 @@ async function handleMessage(data) {
   } catch(e) {
     text = (message.content ?? '').replace(/@[^\s]*/g, '').trim();
   }
-
   if (!text) return;
+
   const chatId = message.chat_id;
-  const wantDoc = needsDoc(text);
-  console.log(`[处理] chatId=${chatId}, wantDoc=${wantDoc}, text=${text}`);
+  const { isDeep, isDoc } = detectIntent(text);
+  console.log(`[处理] isDeep=${isDeep} isDoc=${isDoc} text=${text}`);
 
   try {
     const token = await getFeishuToken();
-    
-    if (wantDoc) {
-      await sendFeishuMessage(token, chatId, `📄 正在生成完整选品报告并创建飞书文档，请稍候（约2-3分钟）...`);
+
+    if (isDeep) {
+      await sendFeishuMessage(token, chatId,
+        `🚀 开始深度分析「${text.replace(/深度分析|完整分析|系统分析|全面分析|深入分析/g, '').trim()}」\n\n将自动完成：\n① 筛选潜力细分类目\n② 分析对标竞品\n③ 查询1688采购成本\n④ 利润测算\n⑤ 生成完整报告${isDoc ? '\n⑥ 创建飞书文档' : ''}\n\n⏱ 预计需要3-5分钟，请耐心等待...`
+      );
     } else {
-      await sendFeishuMessage(token, chatId, `🔍 正在调用Sorftime数据分析，请稍候（约60秒）...`);
+      await sendFeishuMessage(token, chatId, `🔍 正在查询数据，请稍候...`);
     }
 
-    let reply = await callClaude(text, wantDoc);
+    const systemPrompt = isDeep ? DEEP_SYSTEM : NORMAL_SYSTEM;
+    let reply = await callClaude(text, systemPrompt);
 
     const token2 = await getFeishuToken();
 
-    if (wantDoc) {
-      // 提取标题
+    if (isDoc) {
       const titleMatch = reply.match(/^#\s+(.+)$/m);
-      const docTitle = titleMatch ? titleMatch[1].replace(/[🔴🟡🟢📊💡🎯]/g, '').trim() : '选品分析报告';
-      
+      const docTitle = titleMatch ? titleMatch[1].replace(/[🎯📊💡🔴🟡🟢]/g, '').trim() : '亚马逊选品分析报告';
       try {
         const docUrl = await createFeishuDoc(token2, docTitle, reply);
-        await sendFeishuMessage(token2, chatId, `✅ 飞书文档已生成！\n\n📄 **${docTitle}**\n🔗 ${docUrl}\n\n点击链接查看完整报告。`);
+        const preview = reply.substring(0, 500) + '...\n\n（完整内容见飞书文档）';
+        await sendFeishuMessage(token2, chatId, `${preview}\n\n📄 **完整飞书文档已生成**\n🔗 ${docUrl}`);
       } catch(docErr) {
         console.error('[创建文档失败]', docErr.message);
-        // 文档创建失败则直接发文字
-        if (reply.length > 4000) reply = reply.substring(0, 3900) + '...\n（内容较长已截断，建议重新发送含"飞书文档"关键词）';
-        await sendFeishuMessage(token2, chatId, reply);
+        const truncated = reply.length > 4000 ? reply.substring(0, 3900) + '...\n\n⚠️ 文档创建失败，内容已截断' : reply;
+        await sendFeishuMessage(token2, chatId, truncated);
       }
     } else {
-      if (reply.length > 4000) reply = reply.substring(0, 3900) + '...\n（内容较长，发送「生成飞书文档」可获取完整报告）';
+      if (reply.length > 4000) {
+        reply = reply.substring(0, 3900) + '...\n\n💡 内容较长已截断，发送「深度分析XX 飞书文档」可获取完整报告';
+      }
       await sendFeishuMessage(token2, chatId, reply);
     }
 
@@ -197,14 +230,13 @@ async function handleMessage(data) {
     console.error('[处理失败]', e.message);
     try {
       const t = await getFeishuToken();
-      await sendFeishuMessage(t, chatId, '抱歉，处理请求时出现错误：' + e.message);
+      await sendFeishuMessage(t, chatId, '⚠️ 处理请求时出现错误：' + e.message);
     } catch(e2) {}
   }
 }
 
 const server = http.createServer((req, res) => {
-  if (req.method === 'GET') { res.writeHead(200); res.end('飞书Sorftime选品机器人运行中'); return; }
-
+  if (req.method === 'GET') { res.writeHead(200); res.end('飞书Sorftime选品机器人 v2.0'); return; }
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
@@ -219,12 +251,9 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ code: 0 }));
       handleMessage(data).catch(e => console.error('[异步错误]', e.message));
     } catch(e) {
-      console.error('[解析错误]', e.message);
       res.writeHead(200); res.end(JSON.stringify({ code: 0 }));
     }
   });
 });
 
-server.listen(CONFIG.PORT, () => console.log(`🚀 机器人已启动，端口: ${CONFIG.PORT}`));
-
-
+server.listen(CONFIG.PORT, () => console.log(`🚀 飞书选品机器人 v2.0 启动，端口: ${CONFIG.PORT}`));
