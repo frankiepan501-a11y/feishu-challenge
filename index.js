@@ -58,9 +58,9 @@ async function createFeishuDoc(token, title, content, senderOpenId) {
     const writeRes = await httpsPost('open.feishu.cn',
       `/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`,
       { Authorization: `Bearer ${token}` },
-      { children: chunk, index: i }
+      { children: chunk }
     );
-    console.log(`[写入块]`, writeRes.code, writeRes.msg ?? '');
+    console.log(`[写入块 ${i+1}-${i+chunk.length}]`, writeRes.code, writeRes.msg ?? JSON.stringify(writeRes).substring(0, 80));
   }
 
   if (senderOpenId) {
@@ -75,28 +75,32 @@ async function createFeishuDoc(token, title, content, senderOpenId) {
   return `https://u1wpma3xuhr.feishu.cn/docx/${docId}`;
 }
 
+function makeTextElement(text) {
+  return { text_run: { content: text.replace(/\*\*(.*?)\*\*/g, '$1').trim(), text_element_style: {} } };
+}
+
 function markdownToBlocks(markdown) {
   const lines = markdown.split('\n');
-  const requests = [];
+  const blocks = [];
   for (const line of lines) {
-    if (!line.trim()) continue;
-    let block;
-    if (line.startsWith('# ')) {
-      block = { block_type: 2, heading1: { elements: [{ type: 0, text_run: { content: line.replace(/^# /, '').replace(/[^\x00-\x7F\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, ''), text_element_style: {} } }] } };
-    } else if (line.startsWith('## ')) {
-      block = { block_type: 3, heading2: { elements: [{ type: 0, text_run: { content: line.replace(/^## /, ''), text_element_style: {} } }] } };
-    } else if (line.startsWith('### ')) {
-      block = { block_type: 4, heading3: { elements: [{ type: 0, text_run: { content: line.replace(/^### /, ''), text_element_style: {} } }] } };
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      block = { block_type: 12, bullet: { elements: [{ type: 0, text_run: { content: line.replace(/^[-*] /, '').replace(/\*\*(.*?)\*\*/g, '$1'), text_element_style: {} } }] } };
-    } else if (/^\d+\. /.test(line)) {
-      block = { block_type: 13, ordered: { elements: [{ type: 0, text_run: { content: line.replace(/^\d+\. /, '').replace(/\*\*(.*?)\*\*/g, '$1'), text_element_style: {} } }] } };
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    if (trimmed.startsWith('# ')) {
+      blocks.push({ block_type: 2, heading1: { elements: [makeTextElement(trimmed.slice(2))] } });
+    } else if (trimmed.startsWith('## ')) {
+      blocks.push({ block_type: 3, heading2: { elements: [makeTextElement(trimmed.slice(3))] } });
+    } else if (trimmed.startsWith('### ')) {
+      blocks.push({ block_type: 4, heading3: { elements: [makeTextElement(trimmed.slice(4))] } });
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      blocks.push({ block_type: 12, bullet: { elements: [makeTextElement(trimmed.slice(2))] } });
+    } else if (/^\d+\.\s/.test(trimmed)) {
+      blocks.push({ block_type: 13, ordered: { elements: [makeTextElement(trimmed.replace(/^\d+\.\s/, ''))] } });
     } else {
-      block = { block_type: 1, text: { elements: [{ type: 0, text_run: { content: line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/^[-—>|]+\s*/, ''), text_element_style: {} } }] } };
+      blocks.push({ block_type: 1, text: { elements: [makeTextElement(trimmed.replace(/^[-—>|]+\s*/, ''))] } });
     }
-    requests.push({ index: requests.length + 1, block });
   }
-  return requests;
+  return blocks;
 }
 
 function detectIntent(text) {
