@@ -163,37 +163,21 @@ async function handleMessage(data) {
   try {
     const token = await getFeishuToken();
 
-    if (isDeep) {
-      await sendFeishuMessage(token, chatId,
-        `🚀 开始深度分析「${text.replace(/深度分析|完整分析|系统分析|全面分析|深入分析/g, '').trim()}」\n\n将自动完成：\n① 筛选潜力细分类目\n② 分析对标竞品\n③ 查询1688采购成本\n④ 利润测算\n⑤ 生成完整报告${isDoc ? '\n⑥ 创建飞书文档' : ''}\n\n⏱ 预计需要3-5分钟，请耐心等待...`
-      );
-    } else {
-      await sendFeishuMessage(token, chatId, `🔍 正在查询数据，请稍候...`);
-    }
+    // 发送等待提示
+    const hint = isDoc
+      ? `🚀 开始深度分析，将自动完成：\n① 筛选潜力细分类目\n② 分析对标竞品\n③ 查询1688采购成本\n④ 利润测算\n⑤ 生成完整报告\n⑥ 创建飞书文档\n\n⏱ 预计需要3-5分钟...`
+      : isDeep ? `🔍 正在深度分析，请稍候3-5分钟...` : `🔍 正在查询数据，请稍候...`;
+    await sendFeishuMessage(token, chatId, hint);
 
-    const systemPrompt = isDeep ? DEEP_SYSTEM : NORMAL_SYSTEM;
-    let reply = await callClaude(text, systemPrompt, chatId);
+    // 异步调用n8n完成分析+发消息（n8n负责后续所有流程）
+    callN8nAnalysis(text, chatId, senderOpenId, isDeep, isDoc)
+      .then(() => console.log('[n8n分析完成]'))
+      .catch(e => {
+        console.error('[n8n分析失败]', e.message);
+        getFeishuToken().then(t => sendFeishuMessage(t, chatId, `⚠️ 分析失败：${e.message}`)).catch(()=>{});
+      });
 
-    const token2 = await getFeishuToken();
-
-    if (isDoc) {
-      const titleMatch = reply.match(/^#\s+(.+)$/m);
-      const docTitle = titleMatch ? titleMatch[1].replace(/[🎯📊💡🔴🟡🟢]/g, '').trim() : '亚马逊选品分析报告';
-      try {
-        const docUrl = await createFeishuDoc(docTitle, reply, senderOpenId);
-        await sendFeishuMessage(token2, chatId, `✅ 分析完成！\n\n📄 ${docTitle}\n🔗 ${docUrl}`);
-      } catch(docErr) {
-        console.error('[创建文档失败]', docErr.message);
-        await sendFeishuMessage(token2, chatId, `⚠️ 飞书文档创建失败：${docErr.message}\n\n请重试或联系管理员。`);
-      }
-    } else {
-      if (reply.length > 4000) {
-        reply = reply.substring(0, 3900) + '...\n\n💡 内容较长已截断，发送「深度分析XX 飞书文档」可获取完整报告';
-      }
-      await sendFeishuMessage(token2, chatId, reply);
-    }
-
-    console.log('[回复成功]');
+    console.log('[已转交n8n处理]');
   } catch(e) {
     console.error('[处理失败]', e.message);
     try {
