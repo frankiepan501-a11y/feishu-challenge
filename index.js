@@ -55,7 +55,7 @@ async function createFeishuDoc(token, title, content) {
     await httpsPost('open.feishu.cn', `/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children/batch_update`,
       { Authorization: `Bearer ${token}` }, { requests: blocks });
   }
-  return `https://docs.feishu.cn/docs/${docId}`;
+  return `https://u1wpma3xuhr.feishu.cn/docx/${docId}`;
 }
 
 function markdownToBlocks(markdown) {
