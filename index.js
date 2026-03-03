@@ -44,17 +44,34 @@ async function sendFeishuMessage(token, chatId, text) {
   );
 }
 
-async function createFeishuDoc(token, title, content) {
+async function createFeishuDoc(token, title, content, senderOpenId) {
   const createRes = await httpsPost('open.feishu.cn', '/open-apis/docx/v1/documents',
     { Authorization: `Bearer ${token}` }, { title });
+  console.log('[创建文档]', JSON.stringify(createRes).substring(0, 200));
   const docId = createRes.data?.document?.document_id;
   if (!docId) throw new Error('创建文档失败: ' + JSON.stringify(createRes));
 
   const blocks = markdownToBlocks(content);
-  if (blocks.length > 0) {
-    await httpsPost('open.feishu.cn', `/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children/batch_update`,
-      { Authorization: `Bearer ${token}` }, { requests: blocks });
+  const chunkSize = 50;
+  for (let i = 0; i < blocks.length; i += chunkSize) {
+    const chunk = blocks.slice(i, i + chunkSize);
+    const writeRes = await httpsPost('open.feishu.cn',
+      `/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`,
+      { Authorization: `Bearer ${token}` },
+      { children: chunk, index: i }
+    );
+    console.log(`[写入块]`, writeRes.code, writeRes.msg ?? '');
   }
+
+  if (senderOpenId) {
+    const shareRes = await httpsPost('open.feishu.cn',
+      `/open-apis/drive/v1/permissions/${docId}/members?type=docx`,
+      { Authorization: `Bearer ${token}` },
+      { member_type: 'openid', member_id: senderOpenId, perm: 'edit', type: 'user' }
+    );
+    console.log('[分享文档]', JSON.stringify(shareRes).substring(0, 100));
+  }
+
   return `https://u1wpma3xuhr.feishu.cn/docx/${docId}`;
 }
 
@@ -170,6 +187,7 @@ async function handleMessage(data) {
   if (!text) return;
 
   const chatId = message.chat_id;
+  const senderOpenId = event.sender?.sender_id?.open_id ?? body.event?.sender?.sender_id?.open_id ?? null;
   const { isDeep, isDoc } = detectIntent(text);
   console.log(`[处理] isDeep=${isDeep} isDoc=${isDoc} text=${text}`);
 
@@ -193,7 +211,7 @@ async function handleMessage(data) {
       const titleMatch = reply.match(/^#\s+(.+)$/m);
       const docTitle = titleMatch ? titleMatch[1].replace(/[🎯📊💡🔴🟡🟢]/g, '').trim() : '亚马逊选品分析报告';
       try {
-        const docUrl = await createFeishuDoc(token2, docTitle, reply);
+        const docUrl = await createFeishuDoc(token2, docTitle, reply, senderOpenId);
         const preview = reply.substring(0, 500) + '...\n\n（完整内容见飞书文档）';
         await sendFeishuMessage(token2, chatId, `${preview}\n\n📄 **完整飞书文档已生成**\n🔗 ${docUrl}`);
       } catch(docErr) {
