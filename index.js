@@ -45,15 +45,17 @@ async function sendFeishuMessage(token, chatId, text) {
 }
 
 async function createFeishuDoc(title, content, senderOpenId) {
-  const res = await httpsPost('frankiepan501.zeabur.app',
+  console.log('[调用n8n] 开始创建飞书文档, title:', title.substring(0, 50));
+  const res = await httpsPost(
+    'frankiepan501.zeabur.app',
     '/webhook/create-feishu-doc',
-    {},
+    { 'Content-Type': 'application/json' },
     { title, content, sender_open_id: senderOpenId || '' },
-    60000
+    120000
   );
-  console.log('[n8n创建文档]', JSON.stringify(res).substring(0, 200));
-  if (res.success && res.doc_url) return res.doc_url;
-  throw new Error('n8n创建文档失败: ' + JSON.stringify(res));
+  console.log('[n8n响应]', JSON.stringify(res).substring(0, 300));
+  if (res && res.success && res.doc_url) return res.doc_url;
+  throw new Error('n8n创建文档失败: ' + JSON.stringify(res).substring(0, 200));
 }
 
 
@@ -179,12 +181,10 @@ async function handleMessage(data) {
       const docTitle = titleMatch ? titleMatch[1].replace(/[🎯📊💡🔴🟡🟢]/g, '').trim() : '亚马逊选品分析报告';
       try {
         const docUrl = await createFeishuDoc(docTitle, reply, senderOpenId);
-        const preview = reply.substring(0, 500) + '...\n\n（完整内容见飞书文档）';
-        await sendFeishuMessage(token2, chatId, `${preview}\n\n📄 **完整飞书文档已生成**\n🔗 ${docUrl}`);
+        await sendFeishuMessage(token2, chatId, `✅ 分析完成！\n\n📄 ${docTitle}\n🔗 ${docUrl}`);
       } catch(docErr) {
         console.error('[创建文档失败]', docErr.message);
-        const truncated = reply.length > 4000 ? reply.substring(0, 3900) + '...\n\n⚠️ 文档创建失败，内容已截断' : reply;
-        await sendFeishuMessage(token2, chatId, truncated);
+        await sendFeishuMessage(token2, chatId, `⚠️ 飞书文档创建失败：${docErr.message}\n\n请重试或联系管理员。`);
       }
     } else {
       if (reply.length > 4000) {
