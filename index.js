@@ -53,7 +53,7 @@ async function callN8nAnalysis(text, chatId, senderOpenId, isDeep, isDoc) {
   const res = await httpRequest(
     false,
     'n8n-hual.zeabur.internal',
-    '/webhook/feishu-sorftime-bot',
+    '/webhook/feishu-sorftime',
     { 'Content-Type': 'application/json' },
     { text, chatId, senderOpenId: senderOpenId || '', isDeep, isDoc },
     600000,
