@@ -9,11 +9,13 @@ const CONFIG = {
 
 const processedMessages = new Set();
 
-function httpsPost(hostname, path, headers, body, timeoutMs = 30000) {
+function httpRequest(useHttps, hostname, path, headers, body, timeoutMs = 30000, port) {
   return new Promise((resolve, reject) => {
     const payload = typeof body === 'string' ? body : JSON.stringify(body);
-    const req = https.request({
-      hostname, path, method: 'POST', port: 443,
+    const lib = useHttps ? https : http;
+    const defaultPort = useHttps ? 443 : 80;
+    const req = lib.request({
+      hostname, path, method: 'POST', port: port || defaultPort,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers },
       timeout: timeoutMs
     }, (res) => {
@@ -27,6 +29,9 @@ function httpsPost(hostname, path, headers, body, timeoutMs = 30000) {
     req.end();
   });
 }
+
+// 便捷函数
+const httpsPost = (hostname, path, headers, body, timeoutMs) => httpRequest(true, hostname, path, headers, body, timeoutMs);
 
 async function getFeishuToken() {
   const res = await httpsPost('open.feishu.cn', '/open-apis/auth/v3/tenant_access_token/internal', {}, {
@@ -45,12 +50,14 @@ async function sendFeishuMessage(token, chatId, text) {
 // 调用n8n工作流做分析（n8n内部用Sorftime MCP + DeepSeek，完成后直接发飞书消息）
 async function callN8nAnalysis(text, chatId, senderOpenId, isDeep, isDoc) {
   console.log('[调用n8n分析]', new Date().toISOString(), 'text:', text.substring(0, 50));
-  const res = await httpsPost(
-    'frankiepan501.zeabur.app',
+  const res = await httpRequest(
+    false,
+    'n8n-hual.zeabur.internal',
     '/webhook/feishu-sorftime-bot',
     { 'Content-Type': 'application/json' },
     { text, chatId, senderOpenId: senderOpenId || '', isDeep, isDoc },
-    600000
+    600000,
+    5678
   );
   console.log('[n8n分析响应]', JSON.stringify(res).substring(0, 200));
   return res;
